@@ -85,7 +85,7 @@ def valid_external_login(request):
         if value:
             try:
                 email, digest1 = value.split(":")
-                digest2 = hmac.new(key, email).hexdigest()
+                digest2 = hmac.new(bytearray(key, 'utf8'), bytearray(email, 'utf8')).hexdigest()
                 valid = (digest1 == digest2)
                 if not valid:
                     raise Exception("digests do not match")
