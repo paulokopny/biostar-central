@@ -89,7 +89,7 @@ def valid_external_login(request):
                 valid = (digest1 == digest2)
                 if not valid:
                     raise Exception("digests do not match")
-            except Exception, exc:
+            except Exception as exc:
                 logger.error(exc)
                 return False
 
