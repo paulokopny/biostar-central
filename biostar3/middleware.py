@@ -1,9 +1,10 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
+import hmac
 import logging
 
 from django.contrib import messages
 from django.conf import settings
-from django.contrib.auth import get_user_model
+from django.contrib.auth import get_user_model, login
 from django.http import HttpResponsePermanentRedirect as Redirect
 from django.contrib.sites.models import Site
 from allauth.socialaccount.adapter import DefaultSocialAccountAdapter
@@ -52,6 +53,59 @@ class AutoSignupAdapter(DefaultSocialAccountAdapter):
 
 DOMAIN_CACHE = dict()
 
+
+
+class ExternalAuth(object):
+    '''
+    This is an "autentication" that relies on the user being valid.
+    We're just following the Django interfaces here.
+    '''
+
+    def authenticate(self, email, valid=False):
+        # Check the username/password and return a User.
+        if valid:
+            user = User.objects.get(email=email)
+            user.backend = "%s.%s" % (__name__, self.__class__.__name__)
+            # print user.backend
+            return user
+        else:
+            return None
+
+    def get_user(self, user_id):
+        try:
+            return User.objects.get(pk=user_id)
+        except User.DoesNotExist:
+            return None
+
+def valid_external_login(request):
+    "Attempts to perform an external login"
+
+    for name, key in settings.EXTERNAL_AUTH:
+        value = request.COOKIES.get(name)
+        if value:
+            try:
+                email, digest1 = value.split(":")
+                digest2 = hmac.new(key, email).hexdigest()
+                valid = (digest1 == digest2)
+                if not valid:
+                    raise Exception("digests do not match")
+            except Exception, exc:
+                logger.error(exc)
+                return False
+
+            # If we made it this far the data is valid.
+            user, flag = User.objects.get_or_create(email=email)
+            if flag:
+                logger.info("created user %s" % user.email)
+
+            # Authenticate with local info.
+            user = ExternalAuth().authenticate(email=user.email, valid=valid)
+            login(request=request, user=user)
+            return True
+
+    return False
+
+
 class GlobalMiddleware(object):
     """Performs tasks that are applied on every request"""
 
@@ -79,6 +133,12 @@ class GlobalMiddleware(object):
 
             # Existing site goes into the cache.
             DOMAIN_CACHE[domain] = site
+
+        if not user.is_authenticated():
+
+            # Check external logins.
+            if settings.EXTERNAL_AUTH and valid_external_login(request):
+                messages.success(request, "Login completed")
 
         # Add the subscription information to each request.
         subs = []
